@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Column Reader: read one column of a newspaper PDF at a time</title>
+    <meta name="description" content="Open a newspaper or magazine PDF on your phone, tap the article you want, and read just that column's text, laid out to fit your screen at a size you like. Your PDF stays on your device. Works offline. No account." />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f1e8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#16181d" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <main id="main" tabindex="-1"></main>
+    <input id="file-input" type="file" accept="application/pdf,.pdf" hidden tabindex="-1" />
+    <p class="visually-hidden" id="announce" aria-live="polite" aria-atomic="true"></p>
+    <noscript><p>Column Reader needs JavaScript turned on.</p></noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

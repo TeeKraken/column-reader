@@ -1,0 +1,25 @@
+{
+  "name": "column-reader",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tap one article in a newspaper or magazine PDF and read just that column, laid out to fit a phone screen.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "check": "tsc --noEmit && vitest run"
+  },
+  "packageManager": "pnpm@11.5.2",
+  "dependencies": {
+    "pdfjs-dist": "^6.4.299"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
