@@ -119,7 +119,7 @@ function footer({ wish = false }: { wish?: boolean } = {}) {
   return h(
     "footer",
     { class: "foot" },
-    h("p", {}, "Your PDF stays on this device. Column Reader never uploads it. No account, no cookies, no analytics scripts and no tracking. The site's host keeps a count of visits, and we only look at the totals to see if people find it."),
+    h("p", {}, "Your PDF stays on this device. Column Reader never uploads it. No account or cookies. The app adds no analytics scripts and doesn't track you. Our host, Vercel, keeps request logs that can include IP addresses and the site you came from. We only look at weekly totals of requests to load the app, grouped by that site, to see whether people find it. We don't look at individual requests."),
     h(
       "p",
       {},
