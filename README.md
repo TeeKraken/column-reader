@@ -55,6 +55,12 @@ The offline logic is in `src/sw/worker.js` (tested in `worker.test.ts`), the sam
 
 It is a static site (Vite + vanilla TypeScript) with no environment variables or secrets, hosted on Vercel, which builds it from this repository (`vercel.json` sets a strict Content Security Policy: only this site's own files, no inline scripts or styles).
 
+## Maintenance
+
+This app is looked after, not left behind. Dependabot keeps its dependencies up to date, and the Somebody Build This steward checks on it every month. Security fixes are applied promptly.
+
+Found a problem? [Open an issue](https://github.com/TeeKraken/column-reader/issues) on this repository and describe what happened.
+
 ## Build your own version
 
 Want to build your own version? Ideas never lock: anyone can build this idea too. This is just one take on [the idea](https://somebodybuildthis.dev/ideas/40-a-way-to-tap-one-article-in-a-newspaper-pdf-and-read-just-th), and anyone is welcome to build their own version and ship it there too.
