@@ -10,7 +10,7 @@ Open a newspaper or magazine PDF on your phone, tap the article you want, and re
 
 ## What it does
 
-- **Open a PDF from your phone.** It stays on the device: the app never uploads it, and it has no account, tracking, analytics or third-party scripts.
+- **Open a PDF from your phone.** It stays on the device: the app never uploads it. No account, no cookies, no analytics scripts, no third-party scripts, no tracking. Like any website, the host (Vercel) records requests; we only look at aggregate visit totals and which sites link here, to see whether people find the app.
 - **Tap a column.** Each page is shown small; tap the part you want to read. Screen readers and keyboards get one button per column, in reading order, named by its first words.
 - **Read it laid out for the screen.** The column's text is shown as plain text that fills the screen width, at a size you set with **A−** and **A+** (remembered). Words split across lines with a hyphen are joined back up, and paragraphs are kept.
 - **Next column / Previous column** move along the page without going back. A small picture of the page marks where you are.

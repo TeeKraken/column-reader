@@ -119,7 +119,7 @@ function footer({ wish = false }: { wish?: boolean } = {}) {
   return h(
     "footer",
     { class: "foot" },
-    h("p", {}, "Your PDF stays on this device. Column Reader never uploads it, and has no account or tracking."),
+    h("p", {}, "Your PDF stays on this device. Column Reader never uploads it. No account, no cookies, no analytics scripts and no tracking. The site's host keeps a count of visits, and we only look at the totals to see if people find it."),
     h(
       "p",
       {},
