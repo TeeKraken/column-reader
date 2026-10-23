@@ -6,7 +6,7 @@
 
 Open a newspaper or magazine PDF on your phone, tap the article you want, and read just that column's text, laid out to fit the screen at a size you choose.
 
-**Use it:** LIVE_URL
+**Use it:** https://column-reader.vercel.app
 
 ## What it does
 
