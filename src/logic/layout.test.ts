@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { column, item, widthOf } from "./fixtures";
+import { column, item, justifiedColumn, widthOf } from "./fixtures";
 import { blockAt, buildLines, joinText, layoutPage, readingOrder, type Block } from "./layout";
 import { paragraphs } from "./reflow";
 
@@ -117,3 +117,48 @@ describe("blockAt", () => {
     expect(blockAt(blocks, 30, 400)).toBeNull();
   });
 });
+
+describe("justified text set one piece per word", () => {
+  // Columns 160pt wide, 11pt apart (1.1 ems); stretched word spaces reach 1.2-2 ems.
+  const leftLines = [
+    "The footbridge over Pebble",
+    "Creek will stay where it is,",
+    "the council decided late on",
+    "Tuesday night after a long",
+    "debate about its future and",
+    "the cost of repairs.",
+  ];
+  const rightLines = [
+    "Engineers said the frame is",
+    "sound, but the deck and the",
+    "railings need replacing and",
+    "the steps at each end will",
+    "become a ramp so that all can",
+    "cross with ease.",
+  ];
+  const left = justifiedColumn(leftLines, 0, 40, 160);
+  const right = justifiedColumn(rightLines, 171, 40, 160);
+  const words = (lines: string[]) => lines.join(" ");
+
+  it("keeps the columns apart even where a word space is wider than the gutter", () => {
+    const gaps = left.filter((it, i) => i > 0 && left[i - 1].y === it.y).map((it, i) => it.x - (left[i].x + left[i].w));
+    expect(Math.max(...gaps)).toBeGreaterThan(11); // the test really has word spaces wider than the gutter
+    const blocks = layoutPage([...right, ...left]);
+    expect(blocks.map(textOf)).toEqual([words(leftLines), words(rightLines)]);
+  });
+
+  it("isn't fooled by a wider line in another size or typeface running across both columns", () => {
+    const deck = item("A standfirst in italics that runs right across both of the columns", 0, 24, 10.5, "italic");
+    const caption = item("A caption in its own typeface across both columns, same size", 0, 116, 10, "caption");
+    const blocks = layoutPage([deck, ...left, ...right, caption]);
+    const texts = blocks.map(textOf);
+    expect(texts).toContain(words(leftLines));
+    expect(texts).toContain(words(rightLines));
+  });
+
+  it("still joins a justified line when every line around it has letters across its word spaces", () => {
+    const lines = buildLines(left);
+    expect(lines.map((l) => l.text)).toEqual(leftLines);
+  });
+});
+

@@ -25,7 +25,7 @@ Open a newspaper or magazine PDF on your phone, tap the article you want, and re
 - **Hidden text.** Some PDFs carry invisible leftover text under the visible page; it can get mixed in, because the app can't yet tell it apart from visible text.
 - It does not follow "continued on page 6" jumps for you; go to that page and tap the column.
 
-It was checked on three real papers (a weekly community newspaper, an Army installation newspaper and a computer magazine): 12 of 13 articles in different positions read in the right order; the one failure was a page with hidden leftover text.
+It was checked on three real papers (a weekly community newspaper, an Army installation newspaper and a computer magazine): 12 of 13 articles in different positions read in the right order; the one failure was a page with hidden leftover text. It was also checked on made-up sample pages with justified text and narrow gutters, including columns of different widths.
 
 Needs a current browser (tested in Chrome at phone and desktop sizes, including Chrome 123 from 2024). Works from 375px wide, follows your system's light or dark mode, respects "reduce motion", and has visible keyboard focus.
 
@@ -46,7 +46,7 @@ PDFs are read with [pdf.js](https://mozilla.github.io/pdf.js/) (`pdfjs-dist`), b
 The interesting logic is small and pure, in `src/logic/`, with tests built from synthetic text positions:
 
 - `items.ts` turns pdf.js text pieces into page positions, drops text drawn twice, and spots pages with no text (scans).
-- `layout.ts` finds the columns. Pieces on one baseline are joined into lines, but never across a gutter: a gap counts as a gutter only when the lines above and below are empty there too (so a wide word space in justified text doesn't split a line, and two big headlines that almost touch do get split). Lines stacked in one column, in the same size and font, become a block (a column of one article, a headline, a caption). Blocks are put in reading order by cutting the page at clear vertical space first (columns, left to right), then at clear horizontal space (top to bottom). Drop caps are joined to their word.
+- `layout.ts` finds the columns. Pieces on one baseline are joined into lines, but never across a gutter: a gap counts as a gutter only when a clear channel runs through it in the lines above and below too, in the same size and typeface (so a stretched word space in justified text, even one wider than the gutter, doesn't split a line, while two big headlines that almost touch do get split). Lines stacked in one column, in the same size and font, become a block (a column of one article, a headline, a caption). Blocks are put in reading order by cutting the page at clear vertical space first (columns, left to right), then at clear horizontal space (top to bottom). Drop caps are joined to their word.
 - `reflow.ts` turns a block back into paragraphs (indents, blank lines, short lines ending a sentence) and joins words broken with a hyphen at the end of a line, keeping real hyphens like "90-minute".
 - `memory.ts` holds the saved text size and reading places, read back safely.
 - `datafiles.ts` loads pdf.js's data files for one PDF and notes if any failed.

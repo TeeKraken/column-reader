@@ -36,8 +36,14 @@ export interface Block {
   size: number;
 }
 
-/** Gaps wider than this (in ems) always split a line: it's a gutter or a table. */
-const MAX_WORD_GAP = 1.6;
+/**
+ * Gaps wider than this (in ems) always split a line: it's a gutter or a table.
+ * Justified text in narrow columns can stretch a word space to two ems or more,
+ * so narrower gaps are judged by the lines around them (see isGutter).
+ */
+const MAX_WORD_GAP = 4;
+/** Lines compared with when judging a gap are in the same size of type as it, within this ratio. */
+const SAME_TYPE = 1.12;
 /** Gaps narrower than this (in ems) never split a line: they're between words. */
 const WORD_SPACE = 0.25;
 /** With no lines around to compare with, gaps wider than this (in ems) split a line. */
@@ -117,35 +123,62 @@ function fragmentsOf(row: TextItem[]): Fragment[] {
 /**
  * Is the gap between two pieces on one line a gutter between columns? A word
  * space in justified text can be nearly as wide as a narrow gutter, and big
- * headlines in neighbouring columns can almost touch. So look at the lines just
- * above and below (up to two each way, in the same size of type): in a column of
- * text, some of them have letters where this line has its gap. A gutter is empty
- * all the way down.
+ * headlines in neighbouring columns can almost touch; in justified text set as
+ * one piece per word, a stretched word space can even be wider than the gutter.
+ * So look at the lines just above and below (up to three each way, in the same
+ * size and typeface, so a headline, standfirst or caption across both columns
+ * doesn't count): in a column of
+ * text, between them they have letters all across this line's gap. A gutter
+ * leaves a clear channel (at least a quarter em wide) all the way down.
  */
 function isGutter(rows: Fragment[][], r: number, a: Fragment, b: Fragment): boolean {
   const size = Math.min(a.size, b.size);
   const gap = b.x - a.right;
   if (gap <= WORD_SPACE * size) return false;
   if (gap > MAX_WORD_GAP * size) return true;
-  const mid = (a.right + b.x) / 2;
+  // The part of the gap no line around it has letters in.
+  let free: [number, number][] = [[a.right, b.x]];
   const y = rows[r][0].y;
   let seen = 0;
-  let covered = 0;
   for (const dir of [-1, 1]) {
     let found = 0;
-    for (let k = r + dir; k >= 0 && k < rows.length && found < 2; k += dir) {
+    for (let k = r + dir; k >= 0 && k < rows.length && found < 3; k += dir) {
       const dy = Math.abs(rows[k][0].y - y);
-      if (dy > 3.5 * size) break;
+      if (dy > 5 * size) break;
       if (dy < 0.6 * size) continue;
-      const near = rows[k].filter((f) => similarSize(f.size, size) && overlap(f.x, f.right, a.x, b.right) > 0);
+      const near = rows[k].filter(
+        (f) =>
+          similarSize(f.size, size, SAME_TYPE) &&
+          sameFont(f, a, b) &&
+          overlap(f.x, f.right, a.x, b.right) > 0,
+      );
       if (!near.length) continue;
       found++;
       seen++;
-      if (near.some((f) => f.x - 0.05 * size <= mid && mid <= f.right + 0.05 * size)) covered++;
+      for (const f of near) free = subtract(free, f.x - 0.05 * size, f.right + 0.05 * size);
     }
   }
   if (!seen) return gap > LONE_GUTTER * size;
-  return covered === 0;
+  return free.some(([l, rr]) => rr - l >= 0.25 * size);
+}
+
+/** Is a neighbouring piece in the typeface of either side of a gap (when fonts are known)? */
+function sameFont(f: Fragment, a: Fragment, b: Fragment): boolean {
+  if (!f.font || (!a.font && !b.font)) return true;
+  return f.font === a.font || f.font === b.font;
+}
+
+/** Removes [from, to] from a list of intervals. */
+function subtract(intervals: [number, number][], from: number, to: number): [number, number][] {
+  const out: [number, number][] = [];
+  for (const [l, r] of intervals) {
+    if (to <= l || from >= r) out.push([l, r]);
+    else {
+      if (from > l) out.push([l, from]);
+      if (to < r) out.push([to, r]);
+    }
+  }
+  return out;
 }
 
 /** Joins the pieces of one line into text, adding spaces where there's a visible gap. */

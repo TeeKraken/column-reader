@@ -35,3 +35,26 @@ export function column(lines: (string | (string | number)[])[], x: number, y: nu
   });
   return out;
 }
+
+/**
+ * A justified column set one piece per word, as some PDFs do: every line but the
+ * last is stretched to exactly `width`, so word spaces vary (and can be wider
+ * than a narrow gutter). Space pieces are left out, as pdf.js gives them no width
+ * that the app uses.
+ */
+export function justifiedColumn(lines: string[], x: number, y: number, width: number, size = 10, leading = 12, font = "body") {
+  const out: TextItem[] = [];
+  lines.forEach((line, i) => {
+    const words = line.split(" ");
+    const base = y + i * leading;
+    const inked = words.reduce((n, w) => n + widthOf(w, size), 0);
+    const last = i === lines.length - 1;
+    const space = last || words.length < 2 ? size * 0.25 : (width - inked) / (words.length - 1);
+    let cx = x;
+    for (const w of words) {
+      out.push(item(w, cx, base, size, font));
+      cx += widthOf(w, size) + space;
+    }
+  });
+  return out;
+}
