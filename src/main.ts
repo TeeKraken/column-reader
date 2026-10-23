@@ -4,7 +4,17 @@ import { firstPageWithText } from "./logic/items";
 import { blockAt, type Block } from "./logic/layout";
 import { paperKey, rememberPlace, stepSize, TEXT_SIZES } from "./logic/memory";
 import { paragraphs, preview } from "./logic/reflow";
-import { drawPage, openPdf, pageLayout, PdfOpenError, startWorker, type PageLayout } from "./pdf";
+import {
+  appDataFailed,
+  closePdf,
+  drawPage,
+  markWorkerStale,
+  openPdf,
+  pageLayout,
+  PdfOpenError,
+  startWorker,
+  type PageLayout,
+} from "./pdf";
 import { loadMemory, saveMemory } from "./storage";
 
 const IDEA_URL = "https://somebodybuildthis.dev/ideas/40-a-way-to-tap-one-article-in-a-newspaper-pdf-and-read-just-th";
@@ -280,6 +290,9 @@ window.addEventListener("drop", (e) => {
   void openFile(file);
 });
 
+const APP_BROKEN =
+  "Part of Column Reader didn't load, maybe because you're offline or it was updated while this page was open. Reload the page to fix it.";
+
 const SCANNED =
   "This PDF has no text in it. It looks like scans or photos of pages, so there's no text to lay out. Column Reader only works with PDFs that contain real text.";
 
@@ -299,8 +312,13 @@ async function openFile(file: File) {
   announce("Opening your PDF…");
   try {
     const data = new Uint8Array(await file.arrayBuffer());
+    // Close the previous paper first (frees memory, and lets the PDF reader restart if needed).
+    if (paper) {
+      const old = paper;
+      paper = null;
+      await closePdf(old.doc);
+    }
     const doc = await openPdf(data);
-    if (paper) void paper.doc.loadingTask.destroy();
     const key = paperKey(file.name, file.size, doc.numPages);
     const opened: Paper = { doc, name: file.name.replace(/\.pdf$/i, "") || "Your PDF", key, pages: doc.numPages };
     paper = opened;
@@ -329,7 +347,7 @@ async function openFile(file: File) {
     errorReload = kind === "app-broken";
     error =
       kind === "app-broken"
-        ? "Part of Column Reader didn't load, maybe because it was updated while this page was open. Reload the page to fix it."
+        ? APP_BROKEN
         : kind === "password"
           ? "This PDF is locked with a password, and Column Reader can't open locked PDFs. If you can, download a copy without a password."
           : kind === "not-pdf"
@@ -482,6 +500,14 @@ async function renderPage(p: Paper) {
     status.hidden = true;
     const showNoText = () => {
       noTextBox.hidden = false;
+      // A missing font or character map file makes text unreadable: say that, not "no text".
+      if (appDataFailed()) {
+        noTextBox.replaceChildren(
+          h("p", {}, APP_BROKEN),
+          h("button", { class: "btn", type: "button", onclick: () => location.reload() }, "Reload the page"),
+        );
+        return;
+      }
       if (p.textFrom === null) {
         noTextBox.replaceChildren(h("p", {}, SCANNED));
         return;
@@ -777,10 +803,34 @@ render();
 // Load the PDF reader's worker now, with the rest of this version of the app.
 startWorker();
 
+/** The scripts and stylesheets this page loaded from this site (they name its version). */
+function ownAssets(): string[] {
+  const els = document.querySelectorAll<HTMLScriptElement | HTMLLinkElement>(
+    "script[src], link[rel=stylesheet][href], link[rel=modulepreload][href]",
+  );
+  const out: string[] = [];
+  for (const el of els) {
+    const url = new URL(el instanceof HTMLScriptElement ? el.src : el.href, location.href);
+    if (url.origin === location.origin) out.push(url.pathname);
+  }
+  return out;
+}
+
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      /* offline support is a bonus; the app works without it */
-    });
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then(async () => {
+        if (navigator.serviceWorker.controller) return;
+        // First visit: once the offline copy is installed, ask the service worker to
+        // cover this page too (it checks this page is the same version), so it works
+        // offline right away, without a reload.
+        const reg = await navigator.serviceWorker.ready;
+        navigator.serviceWorker.addEventListener("controllerchange", () => markWorkerStale(), { once: true });
+        reg.active?.postMessage({ type: "claim-if-same-release", assets: ownAssets() });
+      })
+      .catch(() => {
+        /* offline support is a bonus; the app works without it */
+      });
   });
 }

@@ -20,7 +20,69 @@ export class PdfOpenError extends Error {
   }
 }
 
+/**
+ * Counts failed loads of pdf.js's data files (character maps, fonts, decoders).
+ * pdf.js carries on without them, so a page that needs one can look empty;
+ * that must be reported as a loading problem, never as "this PDF has no text".
+ */
+let dataFailures = 0;
+
+/** True if any of the app's own data files failed to load (e.g. offline, or the app changed). */
+export function appDataFailed(): boolean {
+  return dataFailures > 0;
+}
+
+type DataKind = "cMapUrl" | "standardFontDataUrl" | "wasmUrl";
+
+/**
+ * Loads pdf.js data files on the page itself (not inside the pdf.js worker), so
+ * they go through the page's service worker and come from the same release as
+ * the page, and so a failure is noticed.
+ */
+class AppDataFactory {
+  private readonly urls: Record<DataKind, string | null>;
+  constructor(opts: { cMapUrl?: string | null; standardFontDataUrl?: string | null; wasmUrl?: string | null }) {
+    this.urls = {
+      cMapUrl: opts.cMapUrl ?? null,
+      standardFontDataUrl: opts.standardFontDataUrl ?? null,
+      wasmUrl: opts.wasmUrl ?? null,
+    };
+  }
+  async fetch({ kind, filename }: { kind: DataKind; filename: string }): Promise<Uint8Array> {
+    const base = this.urls[kind];
+    if (!base) throw new Error(`No ${kind}`);
+    try {
+      const res = await fetch(base + filename);
+      if (!res.ok) throw new Error(`${res.status}`);
+      return new Uint8Array(await res.arrayBuffer());
+    } catch (err) {
+      dataFailures++;
+      throw new Error(`Unable to load ${base}${filename}: ${(err as Error)?.message}`);
+    }
+  }
+}
+
 let worker: Worker | null = null;
+/** Set once this page has been taken over by its service worker after starting the pdf.js worker. */
+let workerStale = false;
+let openDocs = 0;
+
+/**
+ * On a first visit the page starts before its service worker is installed. Once
+ * the worker has taken over the page (see sw/worker.js), restart the pdf.js
+ * worker the next time nothing is open, so it is covered by the offline cache too.
+ */
+export function markWorkerStale() {
+  workerStale = true;
+}
+
+function restartWorkerIfStale() {
+  if (!workerStale || openDocs > 0 || !worker || workerFailed) return;
+  workerStale = false;
+  worker.terminate();
+  worker = null;
+  startWorker();
+}
 /** Settles (rejects) only if the pdf.js worker fails to start or crashes. */
 let workerBroken: Promise<never> = new Promise(() => {});
 let workerFailed = false;
@@ -51,6 +113,7 @@ export function startWorker() {
 }
 
 export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
+  restartWorkerIfStale();
   startWorker();
   if (workerFailed) throw new PdfOpenError("app-broken");
   const task = getDocument({
@@ -60,6 +123,8 @@ export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
     standardFontDataUrl: "/pdfjs/standard_fonts/",
     wasmUrl: "/pdfjs/wasm/",
     iccUrl: "/pdfjs/iccs/",
+    BinaryDataFactory: AppDataFactory,
+    useWorkerFetch: false,
     enableXfa: false,
     verbosity: 0,
   });
@@ -68,7 +133,9 @@ export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
     void task.destroy();
   };
   try {
-    return await Promise.race([task.promise, workerBroken]);
+    const doc = await Promise.race([task.promise, workerBroken]);
+    openDocs++;
+    return doc;
   } catch (err) {
     if (err instanceof PdfOpenError) {
       void task.destroy();
@@ -158,4 +225,10 @@ export function drawPage(
     }),
     cancel: () => task.cancel(),
   };
+}
+
+/** Closes a PDF and frees its memory. */
+export async function closePdf(doc: PDFDocumentProxy): Promise<void> {
+  openDocs = Math.max(0, openDocs - 1);
+  await doc.loadingTask.destroy();
 }

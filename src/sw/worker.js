@@ -55,8 +55,8 @@ export async function installRelease(scope, cacheName, precache) {
 export function registerWorker(scope, config) {
   const { cacheName, precache } = config;
 
-  // No skipWaiting() and no clients.claim(): a new version waits until every page
-  // of the old one is closed. An open page keeps loading files lazily (the pdf.js
+  // No skipWaiting(), and no blanket clients.claim() (only claimIfSameRelease, below):
+  // a new version waits until every page of the old one is closed. An open page keeps loading files lazily (the pdf.js
   // worker, its fonts and decoders), and they must come from its own release; the
   // old worker and its cache stay in charge of that page until it goes away.
   scope.addEventListener("install", (event) => {
@@ -70,6 +70,13 @@ export function registerWorker(scope, config) {
         .keys()
         .then((keys) => Promise.all(keys.filter((k) => k !== cacheName).map((k) => scope.caches.delete(k)))),
     );
+  });
+
+  const sameRelease = new Set();
+  scope.addEventListener("message", (event) => {
+    const data = event.data;
+    if (!data || data.type !== "claim-if-same-release" || !event.source) return;
+    event.waitUntil(claimIfSameRelease(scope, precache, sameRelease, event.source.id, data.assets));
   });
 
   scope.addEventListener("fetch", (event) => {
@@ -90,11 +97,19 @@ export function registerWorker(scope, config) {
 }
 
 /**
- * Network first, so people get updates. The network response is passed through
- * as it is and never cached here: the offline copy stays the one installed with
- * this version's files. With no network, that copy is served.
+ * The app's page is always answered from this version's own cache, even online,
+ * so a page always matches the worker serving its files: a new tab opened while
+ * an update waits gets the same version as the tabs already open, never a newer
+ * page mixed with older files. The new version takes over once every page of the
+ * old one is closed. Other paths go to the network as they are.
  */
 export async function handleNavigation(scope, cacheName, req) {
+  const path = new URL(req.url).pathname;
+  if (path === SHELL || path === "/index.html") {
+    const cache = await scope.caches.open(cacheName);
+    const hit = await cache.match(SHELL, { ignoreVary: true });
+    if (hit) return hit;
+  }
   try {
     return await scope.fetch(req);
   } catch {
@@ -102,4 +117,29 @@ export async function handleNavigation(scope, cacheName, req) {
     const hit = await cache.match(SHELL, { ignoreVary: true });
     return hit || Response.error();
   }
+}
+
+/**
+ * First visit: the page loaded before this worker was installed, so it isn't
+ * covered by the offline cache until it's taken over. The page asks, listing the
+ * scripts and stylesheets it loaded. The worker takes over only when every open
+ * page not yet covered has asked and loads only files of this very version (file
+ * names carry a hash of their contents), so it never takes over a page of another
+ * version. Returns whether it took over.
+ * @param {any} scope
+ * @param {string[]} precache
+ * @param {Set<string>} sameRelease  ids of pages known to be this version
+ * @param {string} clientId
+ * @param {unknown} assets
+ */
+export async function claimIfSameRelease(scope, precache, sameRelease, clientId, assets) {
+  const listed = new Set(precache);
+  const ok = Array.isArray(assets) && assets.length > 0 && assets.every((a) => typeof a === "string" && listed.has(a));
+  if (!ok) return false;
+  sameRelease.add(clientId);
+  const all = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const covered = new Set((await scope.clients.matchAll({ type: "window" })).map((c) => c.id));
+  if (all.some((c) => !covered.has(c.id) && !sameRelease.has(c.id))) return false;
+  await scope.clients.claim();
+  return true;
 }

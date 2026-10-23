@@ -72,16 +72,20 @@ function worker(caches: ReturnType<typeof fakeCaches>, config: { cacheName: stri
     clients: {
       claim: async () => {
         takeovers.push("claim");
+        for (const c of pages) c.controlled = true;
       },
+      matchAll: async (opts: { includeUncontrolled?: boolean } = {}) =>
+        pages.filter((c) => opts.includeUncontrolled || c.controlled).map((c) => ({ id: c.id })),
     },
     caches,
     addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn),
   };
   registerWorker(scope, config);
-  async function dispatch(type: string, request?: unknown) {
+  async function dispatch(type: string, request?: unknown, extra: Record<string, unknown> = {}) {
     const pending: Promise<unknown>[] = [];
     let response: Promise<Response> | undefined;
     listeners[type]({
+      ...extra,
       request,
       waitUntil: (p: Promise<unknown>) => pending.push(p),
       respondWith: (p: Promise<Response>) => (response = p),
@@ -96,14 +100,20 @@ function worker(caches: ReturnType<typeof fakeCaches>, config: { cacheName: stri
     navigate: (path: string) =>
       dispatch("fetch", { url: ORIGIN + path, method: "GET", mode: "navigate" }) as Promise<Response>,
     get: (path: string) => dispatch("fetch", new Request(ORIGIN + path)) as Promise<Response>,
+    /** A page asks to be covered, listing the files it loaded. */
+    ask: (id: string, assets: unknown) =>
+      dispatch("message", undefined, { data: { type: "claim-if-same-release", assets }, source: { id } }),
   };
 }
 
 /** Calls that would let a new version take over pages of an old one. */
 const takeovers: string[] = [];
+/** Open pages (window clients) and whether a service worker covers them. */
+const pages: { id: string; controlled: boolean }[] = [];
 
 function reset() {
   takeovers.length = 0;
+  pages.length = 0;
   net.online = true;
   net.fail.clear();
 }
@@ -135,8 +145,9 @@ describe("service worker", () => {
     const v1 = worker(caches, deploy("v1"));
     await v1.install();
     expect((await v1.navigate("/missing")).status).toBe(404);
+    // The app's page itself always comes from the installed copy, even if the server errors.
     net.files.set("/", "500");
-    expect((await v1.navigate("/")).status).toBe(500);
+    expect(await (await v1.navigate("/")).text()).toContain("v1 shell");
     net.online = false;
     const offline = await v1.navigate("/");
     expect(offline.status).toBe(200);
@@ -150,10 +161,9 @@ describe("service worker", () => {
     await v1.install();
     await v1.activate();
 
-    // A new release goes live. Online, v1 passes the new page and its script through.
+    // A new release goes live. v1 keeps serving its own page (never v2's page with v1's files).
     const v2config = deploy("v2");
-    expect(await (await v1.navigate("/")).text()).toContain("v2 shell");
-    expect(await (await v1.get("/assets/v2.js")).text()).toBe("v2 script");
+    expect(await (await v1.navigate("/")).text()).toContain("v1 shell");
 
     // v2's install fails part-way (the connection drops while fetching its script).
     net.fail.add("/assets/v2.js");
@@ -236,5 +246,65 @@ describe("service worker", () => {
     await v2.activate();
     expect(takeovers).toEqual([]);
     expect([...caches.stores.keys()]).toEqual(["reader-v2"]);
+  });
+
+  it("gives a new tab the open version's page and files while an update waits", async () => {
+    reset();
+    const caches = fakeCaches();
+    const v1config = deploy("v1");
+    // A data file whose path doesn't change between versions (a pdf.js decoder).
+    net.files.set("/pdfjs/wasm/decoder.wasm", "v1 decoder");
+    v1config.precache.push("/pdfjs/wasm/decoder.wasm");
+    const v1 = worker(caches, v1config);
+    await v1.install();
+    await v1.activate();
+
+    const v2config = deploy("v2");
+    net.files.set("/pdfjs/wasm/decoder.wasm", "v2 decoder");
+    v2config.precache.push("/pdfjs/wasm/decoder.wasm");
+    await worker(caches, v2config).install(); // waiting: an old tab is still open
+
+    // A new tab (or a reload) under v1: v1's page, so the files it then asks for
+    // (from v1's cache) all belong to the same version.
+    const shell = await (await v1.navigate("/")).text();
+    expect(shell).toContain("v1 shell");
+    expect(shell).not.toContain("v2");
+    expect(await (await v1.get("/assets/v1.js")).text()).toBe("v1 script");
+    expect(await (await v1.get("/pdfjs/wasm/decoder.wasm")).text()).toBe("v1 decoder");
+  });
+
+  it("covers a first-visit page right after installing, only if it is the same version", async () => {
+    reset();
+    const caches = fakeCaches();
+    const v1 = worker(caches, deploy("v1"));
+    pages.push({ id: "tab-a", controlled: false });
+    await v1.install();
+    await v1.activate();
+    expect(takeovers).toEqual([]);
+
+    // A page of another version asks: refused.
+    await v1.ask("tab-a", ["/assets/v0.js", "/assets/v0.css"]);
+    expect(takeovers).toEqual([]);
+    // Nonsense is refused too.
+    await v1.ask("tab-a", "not a list");
+    await v1.ask("tab-a", []);
+    expect(takeovers).toEqual([]);
+
+    // The same version: taken over, so it now works offline without a reload.
+    await v1.ask("tab-a", ["/assets/v1.js", "/assets/v1.css"]);
+    expect(takeovers).toEqual(["claim"]);
+  });
+
+  it("doesn't take over while another uncovered page hasn't shown it's the same version", async () => {
+    reset();
+    const caches = fakeCaches();
+    const v1 = worker(caches, deploy("v1"));
+    pages.push({ id: "tab-a", controlled: false }, { id: "tab-b", controlled: false });
+    await v1.install();
+    await v1.activate();
+    await v1.ask("tab-a", ["/assets/v1.js"]);
+    expect(takeovers).toEqual([]); // tab-b might be another version
+    await v1.ask("tab-b", ["/assets/v1.js", "/assets/v1.css"]);
+    expect(takeovers).toEqual(["claim"]);
   });
 });
