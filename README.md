@@ -57,7 +57,7 @@ It is a static site (Vite + vanilla TypeScript) with no environment variables or
 
 ## Maintenance
 
-This app is looked after, not left behind. Dependabot keeps its dependencies up to date, and the Somebody Build This steward checks on it every month. Security fixes are applied promptly.
+This app is looked after, not left behind. Dependabot proposes dependency updates. The Somebody Build This steward checks on the app each month and reviews security alerts in a weekly security check. Updates go through review and automated checks before they are merged.
 
 Found a problem? [Open an issue](https://github.com/TeeKraken/column-reader/issues) on this repository and describe what happened.
 
