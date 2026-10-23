@@ -222,6 +222,14 @@ h1:focus {
   font-weight: 600;
   margin: 0 0 16px;
 }
+.error p,
+.warn p {
+  margin: 0 0 8px;
+}
+.error p:last-child,
+.warn p:last-child {
+  margin-bottom: 0;
+}
 .warn {
   background: var(--warn-bg);
   color: var(--ink);

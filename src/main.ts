@@ -1,9 +1,10 @@
 import "./style.css";
 import type { PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { firstPageWithText } from "./logic/items";
 import { blockAt, type Block } from "./logic/layout";
 import { paperKey, rememberPlace, stepSize, TEXT_SIZES } from "./logic/memory";
 import { paragraphs, preview } from "./logic/reflow";
-import { drawPage, openPdf, pageLayout, PdfOpenError, type PageLayout } from "./pdf";
+import { drawPage, openPdf, pageLayout, PdfOpenError, startWorker, type PageLayout } from "./pdf";
 import { loadMemory, saveMemory } from "./storage";
 
 const IDEA_URL = "https://somebodybuildthis.dev/ideas/40-a-way-to-tap-one-article-in-a-newspaper-pdf-and-read-just-th";
@@ -11,8 +12,6 @@ const REPO_URL = "https://github.com/TeeKraken/column-reader";
 const POST_IDEA_URL = "https://somebodybuildthis.dev/ideas/new";
 /** Bigger files than this are likely to crash a phone's browser. */
 const MAX_BYTES = 250 * 1024 * 1024;
-/** How many of the first pages to check for text before giving up on a PDF. */
-const TEXT_CHECK_PAGES = 3;
 
 const main = document.getElementById("main")!;
 const announcer = document.getElementById("announce")!;
@@ -27,6 +26,8 @@ interface Paper {
   name: string;
   key: string;
   pages: number;
+  /** The first page with text: undefined while still checking, null if none has any. */
+  textFrom?: number | null;
 }
 
 let paper: Paper | null = null;
@@ -40,6 +41,12 @@ let showOriginal = false;
 /** A message for the next screen, e.g. "Welcome back". */
 let notice = "";
 let error = "";
+/** Show a "Reload" button with the error (when part of the app is missing). */
+let errorReload = false;
+/** Called when the background check for text finishes, to update the page screen. */
+let onTextCheckDone: (() => void) | null = null;
+/** Put focus back on the page-size button after redrawing the page screen. */
+let focusZoom = false;
 let busy = false;
 /** Cancels drawings that belong to a screen that has been replaced. */
 let cancelDrawings: (() => void)[] = [];
@@ -181,7 +188,16 @@ function renderHome() {
       ),
     ),
     noticeEl() ?? "",
-    error ? h("p", { class: "error", role: "alert" }, error) : "",
+    error
+      ? h(
+          "div",
+          { class: "error", role: "alert" },
+          h("p", {}, error),
+          errorReload
+            ? h("button", { class: "btn", type: "button", onclick: () => location.reload() }, "Reload the page")
+            : null,
+        )
+      : "",
     h(
       "div",
       { class: "open-row" },
@@ -270,6 +286,7 @@ const SCANNED =
 async function openFile(file: File) {
   if (busy) return;
   error = "";
+  errorReload = false;
   if (file.size > MAX_BYTES) {
     error = "That file is too big to open on most phones (over 250 MB). Try a smaller edition or a single section.";
     go("home", view === "home" ? "replace" : "push");
@@ -283,20 +300,19 @@ async function openFile(file: File) {
   try {
     const data = new Uint8Array(await file.arrayBuffer());
     const doc = await openPdf(data);
-    let anyText = false;
-    for (let p = 1; p <= Math.min(TEXT_CHECK_PAGES, doc.numPages); p++) {
-      if ((await pageLayout(doc, p)).hasText) {
-        anyText = true;
-        break;
-      }
-    }
-    if (!anyText) {
-      await doc.loadingTask.destroy();
-      throw new Error("scanned");
-    }
     if (paper) void paper.doc.loadingTask.destroy();
     const key = paperKey(file.name, file.size, doc.numPages);
-    paper = { doc, name: file.name.replace(/\.pdf$/i, "") || "Your PDF", key, pages: doc.numPages };
+    const opened: Paper = { doc, name: file.name.replace(/\.pdf$/i, "") || "Your PDF", key, pages: doc.numPages };
+    paper = opened;
+    // In the background, find where the text starts (usually page 1, so this is
+    // cheap); pages before it, or a PDF with no text at all, get a plain message.
+    void firstPageWithText(doc.numPages, async (n) => paper === opened && (await pageLayout(doc, n)).hasText).then(
+      (first) => {
+        if (paper !== opened) return;
+        opened.textFrom = first;
+        onTextCheckDone?.();
+      },
+    );
     const place = memory.papers[key];
     pageNo = place ? Math.min(place.page, doc.numPages) : 1;
     column = null;
@@ -310,9 +326,10 @@ async function openFile(file: File) {
     console.error(err);
     busy = false;
     const kind = err instanceof PdfOpenError ? err.kind : (err as Error)?.message;
+    errorReload = kind === "app-broken";
     error =
-      kind === "scanned"
-        ? SCANNED
+      kind === "app-broken"
+        ? "Part of Column Reader didn't load, maybe because it was updated while this page was open. Reload the page to fix it."
         : kind === "password"
           ? "This PDF is locked with a password, and Column Reader can't open locked PDFs. If you can, download a copy without a password."
           : kind === "not-pdf"
@@ -417,10 +434,12 @@ async function renderPage(p: Paper) {
         "button",
         {
           class: "btn btn-quiet",
+          id: "zoom",
           type: "button",
           "aria-pressed": zoom > 1 ? "true" : "false",
           onclick: () => {
             zoom = zoom > 1 ? 1 : 2;
+            focusZoom = true;
             render();
           },
         },
@@ -433,6 +452,12 @@ async function renderPage(p: Paper) {
   // Coming back from a column: focus that column's button once it exists.
   const focusColumn = wantFocus && column !== null;
   if (wantFocus) focusHeading();
+  if (focusZoom) {
+    focusZoom = false;
+    document.getElementById("zoom")?.focus({ preventScroll: true });
+  }
+  const noTextBox = h("div", { class: "warn", role: "status", hidden: true });
+  status.after(noTextBox);
 
   const thisPage = pageNo;
   let layout: PageLayout;
@@ -454,9 +479,27 @@ async function renderPage(p: Paper) {
   cancelDrawings.push(drawing.cancel);
 
   if (!layout.hasText) {
-    status.textContent =
-      "This page has no text to pick out. It looks like a scan or photo of a page, so Column Reader can't lay it out. Try another page.";
-    status.classList.add("warn");
+    status.hidden = true;
+    const showNoText = () => {
+      noTextBox.hidden = false;
+      if (p.textFrom === null) {
+        noTextBox.replaceChildren(h("p", {}, SCANNED));
+        return;
+      }
+      const msg =
+        "This page has no text to pick out. It looks like a picture or a scan of a page, so Column Reader can't lay it out.";
+      const first = p.textFrom;
+      noTextBox.replaceChildren(
+        h("p", {}, first ? `${msg} The first page with text is page ${first}.` : `${msg} Try another page.`),
+        first && first !== thisPage
+          ? h("button", { class: "btn", type: "button", onclick: () => setPage(p, first) }, `Go to page ${first}`)
+          : "",
+      );
+    };
+    showNoText();
+    onTextCheckDone = () => {
+      if (view === "page" && pageNo === thisPage && paper === p && noTextBox.isConnected) showNoText();
+    };
   } else {
     status.textContent = "Tap the column you want to read.";
     const overlay = h("div", { class: "blocks", role: "list", "aria-label": "Columns on this page, in reading order" });
@@ -731,6 +774,8 @@ window.addEventListener("resize", () => {
 
 history.replaceState({ view: "home" }, "", location.pathname);
 render();
+// Load the PDF reader's worker now, with the rest of this version of the app.
+startWorker();
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {

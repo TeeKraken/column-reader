@@ -12,14 +12,7 @@ import {
 import { pageHasText, toTextItems, type RawItem } from "./logic/items";
 import { layoutPage, type Block } from "./logic/layout";
 
-let worker: Worker | null = null;
-function startWorker() {
-  if (worker) return;
-  worker = new Worker(new URL("./pdf-worker.ts", import.meta.url), { type: "module" });
-  GlobalWorkerOptions.workerPort = worker;
-}
-
-export type OpenError = "password" | "not-pdf" | "unknown";
+export type OpenError = "password" | "not-pdf" | "app-broken" | "unknown";
 
 export class PdfOpenError extends Error {
   constructor(readonly kind: OpenError) {
@@ -27,8 +20,39 @@ export class PdfOpenError extends Error {
   }
 }
 
+let worker: Worker | null = null;
+/** Settles (rejects) only if the pdf.js worker fails to start or crashes. */
+let workerBroken: Promise<never> = new Promise(() => {});
+let workerFailed = false;
+
+/**
+ * Starts the pdf.js worker. Called as soon as the app loads, not when the first
+ * PDF is opened: the worker's file belongs to this release of the app, so it is
+ * fetched together with the page, while this release is certainly still online
+ * (or in its offline cache). If it can't load anyway (say the app was updated in
+ * between), opening a PDF says so and offers a reload instead of waiting forever.
+ */
+export function startWorker() {
+  if (worker) return;
+  const w = new Worker(new URL("./pdf-worker.ts", import.meta.url), { type: "module" });
+  worker = w;
+  workerBroken = new Promise<never>((_, reject) => {
+    w.addEventListener(
+      "error",
+      () => {
+        workerFailed = true;
+        reject(new PdfOpenError("app-broken"));
+      },
+      { once: true },
+    );
+  });
+  workerBroken.catch(() => {});
+  GlobalWorkerOptions.workerPort = w;
+}
+
 export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
   startWorker();
+  if (workerFailed) throw new PdfOpenError("app-broken");
   const task = getDocument({
     data,
     cMapUrl: "/pdfjs/cmaps/",
@@ -44,8 +68,12 @@ export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
     void task.destroy();
   };
   try {
-    return await task.promise;
+    return await Promise.race([task.promise, workerBroken]);
   } catch (err) {
+    if (err instanceof PdfOpenError) {
+      void task.destroy();
+      throw err;
+    }
     console.error(err);
     const name = (err as { name?: string })?.name ?? "";
     if (name === "PasswordException" || (err as Error)?.message?.includes("destroyed")) {

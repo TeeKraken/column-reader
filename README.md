@@ -20,7 +20,7 @@ Open a newspaper or magazine PDF on your phone, tap the article you want, and re
 
 ### Honest limits
 
-- **Text PDFs only.** A scanned or photographed page has no text in it, so there's nothing to pick out; the app says so plainly.
+- **Text PDFs only.** A scanned or photographed page has no text in it, so there's nothing to pick out; the app says so plainly on that page and points to the first page that has text (a picture-only cover doesn't stop you reading the rest). If no page has any text, it says the whole PDF has none.
 - **Clear columns work best.** Busy pages (crosswords, ads, tables, text wrapped around odd shapes) can come out in the wrong order or mixed. Captions and photo credits between two columns show up as their own short "column" when you press Next column.
 - **Hidden text.** Some PDFs carry invisible leftover text under the visible page; it can get mixed in, because the app can't yet tell it apart from visible text.
 - It does not follow "continued on page 6" jumps for you; go to that page and tap the column.
@@ -50,7 +50,7 @@ The interesting logic is small and pure, in `src/logic/`, with tests built from 
 - `reflow.ts` turns a block back into paragraphs (indents, blank lines, short lines ending a sentence) and joins words broken with a hyphen at the end of a line, keeping real hyphens like "90-minute".
 - `memory.ts` holds the saved text size and reading places, read back safely.
 
-The offline logic is in `src/sw/worker.js` (tested in `worker.test.ts`), the same approach as [Picture Story](https://github.com/TeeKraken/picture-story); the build inlines it into `/sw.js` with the list of files to cache. At install, each version fetches the page, checks that every script and stylesheet it loads is in that version's own file list (during a deploy, the page can briefly come from a different release), caches those files, and only then stores the page. A mismatch fails the install, so the previous version and its cache stay in charge. The stored page is never overwritten afterwards, so the offline app always matches its scripts, and a new version is used offline only after it has installed completely.
+The offline logic is in `src/sw/worker.js` (tested in `worker.test.ts`), the same approach as [Picture Story](https://github.com/TeeKraken/picture-story); the build inlines it into `/sw.js` with the list of files to cache. At install, each version fetches the page, checks that every script and stylesheet it loads is in that version's own file list (during a deploy, the page can briefly come from a different release), caches those files, and only then stores the page. A mismatch fails the install, so the previous version and its cache stay in charge. The stored page is never overwritten afterwards, so the offline app always matches its scripts, and a new version is used offline only after it has installed completely. A new version also waits until every open page of the old one is closed (no `skipWaiting`, no `clients.claim`), because an open page still loads files later on (the pdf.js worker, fonts and decoders) and they must come from its own release. The pdf.js worker is started as soon as the app loads, and if it can't load at all, opening a PDF says so and offers a reload instead of waiting forever.
 
 It is a static site (Vite + vanilla TypeScript) with no environment variables or secrets, hosted on Vercel, which builds it from this repository (`vercel.json` sets a strict Content Security Policy: only this site's own files, no inline scripts or styles).
 

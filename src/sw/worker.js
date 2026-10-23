@@ -55,16 +55,20 @@ export async function installRelease(scope, cacheName, precache) {
 export function registerWorker(scope, config) {
   const { cacheName, precache } = config;
 
+  // No skipWaiting() and no clients.claim(): a new version waits until every page
+  // of the old one is closed. An open page keeps loading files lazily (the pdf.js
+  // worker, its fonts and decoders), and they must come from its own release; the
+  // old worker and its cache stay in charge of that page until it goes away.
   scope.addEventListener("install", (event) => {
-    event.waitUntil(installRelease(scope, cacheName, precache).then(() => scope.skipWaiting()));
+    event.waitUntil(installRelease(scope, cacheName, precache));
   });
 
+  // Runs only once no page uses an older version, so old caches can go.
   scope.addEventListener("activate", (event) => {
     event.waitUntil(
       scope.caches
         .keys()
-        .then((keys) => Promise.all(keys.filter((k) => k !== cacheName).map((k) => scope.caches.delete(k))))
-        .then(() => scope.clients.claim()),
+        .then((keys) => Promise.all(keys.filter((k) => k !== cacheName).map((k) => scope.caches.delete(k)))),
     );
   });
 

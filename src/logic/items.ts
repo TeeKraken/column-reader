@@ -98,3 +98,23 @@ export function dropDuplicates(items: readonly TextItem[]): TextItem[] {
   }
   return out;
 }
+
+/**
+ * The first page with text, checking pages one at a time from page 1 and
+ * stopping at the first hit (so a normal paper costs one page). Null when no
+ * page has text: then the whole PDF is pictures of pages. A page that can't be
+ * read counts as having no text.
+ */
+export async function firstPageWithText(
+  pages: number,
+  hasText: (page: number) => Promise<boolean>,
+): Promise<number | null> {
+  for (let p = 1; p <= pages; p++) {
+    try {
+      if (await hasText(p)) return p;
+    } catch {
+      /* unreadable page: keep looking */
+    }
+  }
+  return null;
+}

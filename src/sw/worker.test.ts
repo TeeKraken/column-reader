@@ -66,8 +66,14 @@ function worker(caches: ReturnType<typeof fakeCaches>, config: { cacheName: stri
   const scope = {
     location: { origin: ORIGIN },
     fetch: (r: Request | string) => net.fetch(key(r)),
-    skipWaiting: async () => {},
-    clients: { claim: async () => {} },
+    skipWaiting: async () => {
+      takeovers.push("skipWaiting");
+    },
+    clients: {
+      claim: async () => {
+        takeovers.push("claim");
+      },
+    },
     caches,
     addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn),
   };
@@ -93,7 +99,11 @@ function worker(caches: ReturnType<typeof fakeCaches>, config: { cacheName: stri
   };
 }
 
+/** Calls that would let a new version take over pages of an old one. */
+const takeovers: string[] = [];
+
 function reset() {
+  takeovers.length = 0;
   net.online = true;
   net.fail.clear();
 }
@@ -198,5 +208,33 @@ describe("service worker", () => {
     net.files.set("/", page("v1"));
     net.files.set("/assets/v1.js", "v1 script");
     await expect(worker(caches, v2config).install()).rejects.toThrow(/another release/);
+  });
+
+  it("never takes over open pages: an old page still gets its own lazily loaded files", async () => {
+    reset();
+    const caches = fakeCaches();
+    // v1 lists a file its page only loads later (the pdf.js worker).
+    const v1config = deploy("v1");
+    net.files.set("/assets/v1-worker.js", "v1 pdf worker");
+    v1config.precache.push("/assets/v1-worker.js");
+    const v1 = worker(caches, v1config);
+    await v1.install();
+    await v1.activate();
+
+    // v2 is deployed (v1's files are gone from the server) and installs while a
+    // v1 page is still open. It must wait: no skipWaiting, no claim.
+    const v2 = worker(caches, deploy("v2"));
+    await v2.install();
+    expect(takeovers).toEqual([]);
+    expect([...caches.stores.keys()].sort()).toEqual(["reader-v1", "reader-v2"]);
+
+    // The open v1 page now starts its PDF worker: still served, from v1's cache.
+    const res = await v1.get("/assets/v1-worker.js");
+    expect(await res.text()).toBe("v1 pdf worker");
+
+    // Once v1's pages are closed the browser activates v2, which then cleans up.
+    await v2.activate();
+    expect(takeovers).toEqual([]);
+    expect([...caches.stores.keys()]).toEqual(["reader-v2"]);
   });
 });
