@@ -501,7 +501,7 @@ async function renderPage(p: Paper) {
     const showNoText = () => {
       noTextBox.hidden = false;
       // A missing font or character map file makes text unreadable: say that, not "no text".
-      if (appDataFailed()) {
+      if (appDataFailed(p.doc)) {
         noTextBox.replaceChildren(
           h("p", {}, APP_BROKEN),
           h("button", { class: "btn", type: "button", onclick: () => location.reload() }, "Reload the page"),

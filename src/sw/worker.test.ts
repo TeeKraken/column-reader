@@ -295,16 +295,32 @@ describe("service worker", () => {
     expect(takeovers).toEqual(["claim"]);
   });
 
-  it("doesn't take over while another uncovered page hasn't shown it's the same version", async () => {
+  it("a page of another version taken over anyway only gets its own files, never this version's", async () => {
     reset();
     const caches = fakeCaches();
-    const v1 = worker(caches, deploy("v1"));
+    const v1config = deploy("v1");
+    net.files.set("/pdfjs/aaa111/wasm/decoder.wasm", "v1 decoder");
+    v1config.precache.push("/pdfjs/aaa111/wasm/decoder.wasm");
+    const v1 = worker(caches, v1config);
     pages.push({ id: "tab-a", controlled: false }, { id: "tab-b", controlled: false });
     await v1.install();
     await v1.activate();
-    await v1.ask("tab-a", ["/assets/v1.js"]);
-    expect(takeovers).toEqual([]); // tab-b might be another version
-    await v1.ask("tab-b", ["/assets/v1.js", "/assets/v1.css"]);
-    expect(takeovers).toEqual(["claim"]);
+
+    // tab-b finished loading v2 (a deploy happened) just as tab-a's request was
+    // granted; claim() covers both.
+    deploy("v2");
+    net.files.set("/pdfjs/bbb222/wasm/decoder.wasm", "v2 decoder");
+    await v1.ask("tab-a", ["/assets/v1.js", "/assets/v1.css"]);
+    expect(pages.every((c) => c.controlled)).toBe(true);
+
+    // tab-b asks for its own version's files, by their own names: the network
+    // answers with v2's copies; v1's cache is never used for them.
+    expect(await (await v1.get("/assets/v2.js")).text()).toBe("v2 script");
+    expect(await (await v1.get("/pdfjs/bbb222/wasm/decoder.wasm")).text()).toBe("v2 decoder");
+    // Offline, they fail (the app then offers a reload) rather than mixing.
+    net.online = false;
+    await expect(v1.get("/pdfjs/bbb222/wasm/decoder.wasm")).rejects.toThrow();
+    // tab-a still gets v1's own files.
+    expect(await (await v1.get("/pdfjs/aaa111/wasm/decoder.wasm")).text()).toBe("v1 decoder");
   });
 });

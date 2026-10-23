@@ -3,12 +3,16 @@
 // from anywhere else.
 
 import "./polyfills";
+
+/** Where this version's pdf.js data files are (a folder named after their content hash). */
+declare const __PDFJS_BASE__: string;
 import {
   GlobalWorkerOptions,
   getDocument,
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { dataFactoryFor } from "./logic/datafiles";
 import { pageHasText, toTextItems, type RawItem } from "./logic/items";
 import { layoutPage, type Block } from "./logic/layout";
 
@@ -21,45 +25,17 @@ export class PdfOpenError extends Error {
 }
 
 /**
- * Counts failed loads of pdf.js's data files (character maps, fonts, decoders).
- * pdf.js carries on without them, so a page that needs one can look empty;
- * that must be reported as a loading problem, never as "this PDF has no text".
+ * Whether loading a document's pdf.js data files (character maps, fonts,
+ * decoders) failed. pdf.js carries on without them, so a page that needs one can
+ * look empty; that must be reported as a loading problem, never as "this PDF has
+ * no text". Kept per document, so a failure (even a late one, from a document
+ * already closed) never marks a different PDF as broken.
  */
-let dataFailures = 0;
+const dataFailures = new WeakMap<PDFDocumentProxy, { failed: boolean }>();
 
-/** True if any of the app's own data files failed to load (e.g. offline, or the app changed). */
-export function appDataFailed(): boolean {
-  return dataFailures > 0;
-}
-
-type DataKind = "cMapUrl" | "standardFontDataUrl" | "wasmUrl";
-
-/**
- * Loads pdf.js data files on the page itself (not inside the pdf.js worker), so
- * they go through the page's service worker and come from the same release as
- * the page, and so a failure is noticed.
- */
-class AppDataFactory {
-  private readonly urls: Record<DataKind, string | null>;
-  constructor(opts: { cMapUrl?: string | null; standardFontDataUrl?: string | null; wasmUrl?: string | null }) {
-    this.urls = {
-      cMapUrl: opts.cMapUrl ?? null,
-      standardFontDataUrl: opts.standardFontDataUrl ?? null,
-      wasmUrl: opts.wasmUrl ?? null,
-    };
-  }
-  async fetch({ kind, filename }: { kind: DataKind; filename: string }): Promise<Uint8Array> {
-    const base = this.urls[kind];
-    if (!base) throw new Error(`No ${kind}`);
-    try {
-      const res = await fetch(base + filename);
-      if (!res.ok) throw new Error(`${res.status}`);
-      return new Uint8Array(await res.arrayBuffer());
-    } catch (err) {
-      dataFailures++;
-      throw new Error(`Unable to load ${base}${filename}: ${(err as Error)?.message}`);
-    }
-  }
+/** True if any of this document's data files failed to load (e.g. offline). */
+export function appDataFailed(doc: PDFDocumentProxy): boolean {
+  return dataFailures.get(doc)?.failed ?? false;
 }
 
 let worker: Worker | null = null;
@@ -116,14 +92,15 @@ export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
   restartWorkerIfStale();
   startWorker();
   if (workerFailed) throw new PdfOpenError("app-broken");
+  const state = { failed: false };
   const task = getDocument({
     data,
-    cMapUrl: "/pdfjs/cmaps/",
+    cMapUrl: `${__PDFJS_BASE__}cmaps/`,
     cMapPacked: true,
-    standardFontDataUrl: "/pdfjs/standard_fonts/",
-    wasmUrl: "/pdfjs/wasm/",
-    iccUrl: "/pdfjs/iccs/",
-    BinaryDataFactory: AppDataFactory,
+    standardFontDataUrl: `${__PDFJS_BASE__}standard_fonts/`,
+    wasmUrl: `${__PDFJS_BASE__}wasm/`,
+    iccUrl: `${__PDFJS_BASE__}iccs/`,
+    BinaryDataFactory: dataFactoryFor(state),
     useWorkerFetch: false,
     enableXfa: false,
     verbosity: 0,
@@ -134,6 +111,7 @@ export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
   };
   try {
     const doc = await Promise.race([task.promise, workerBroken]);
+    dataFailures.set(doc, state);
     openDocs++;
     return doc;
   } catch (err) {

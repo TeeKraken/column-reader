@@ -55,7 +55,7 @@ export async function installRelease(scope, cacheName, precache) {
 export function registerWorker(scope, config) {
   const { cacheName, precache } = config;
 
-  // No skipWaiting(), and no blanket clients.claim() (only claimIfSameRelease, below):
+  // No skipWaiting(), and clients.claim() only on a first visit (claimIfSameRelease, below):
   // a new version waits until every page of the old one is closed. An open page keeps loading files lazily (the pdf.js
   // worker, its fonts and decoders), and they must come from its own release; the
   // old worker and its cache stay in charge of that page until it goes away.
@@ -72,11 +72,10 @@ export function registerWorker(scope, config) {
     );
   });
 
-  const sameRelease = new Set();
   scope.addEventListener("message", (event) => {
     const data = event.data;
-    if (!data || data.type !== "claim-if-same-release" || !event.source) return;
-    event.waitUntil(claimIfSameRelease(scope, precache, sameRelease, event.source.id, data.assets));
+    if (!data || data.type !== "claim-if-same-release") return;
+    event.waitUntil(claimIfSameRelease(scope, precache, data.assets));
   });
 
   scope.addEventListener("fetch", (event) => {
@@ -122,24 +121,22 @@ export async function handleNavigation(scope, cacheName, req) {
 /**
  * First visit: the page loaded before this worker was installed, so it isn't
  * covered by the offline cache until it's taken over. The page asks, listing the
- * scripts and stylesheets it loaded. The worker takes over only when every open
- * page not yet covered has asked and loads only files of this very version (file
- * names carry a hash of their contents), so it never takes over a page of another
- * version. Returns whether it took over.
+ * scripts and stylesheets it loaded; if they are this version's (file names carry
+ * a hash of their contents), the worker takes over. clients.claim() covers every
+ * open page at once, including one that just loaded another version; that is
+ * safe because every file a page loads, pdf.js data files included
+ * (/pdfjs/<hash>/...), is named by its content: such a page only ever asks for
+ * its own version's files, which this cache doesn't have, so they come from the
+ * network (or fail, and the app offers a reload), never this version's copies.
+ * Returns whether it took over.
  * @param {any} scope
  * @param {string[]} precache
- * @param {Set<string>} sameRelease  ids of pages known to be this version
- * @param {string} clientId
  * @param {unknown} assets
  */
-export async function claimIfSameRelease(scope, precache, sameRelease, clientId, assets) {
+export async function claimIfSameRelease(scope, precache, assets) {
   const listed = new Set(precache);
   const ok = Array.isArray(assets) && assets.length > 0 && assets.every((a) => typeof a === "string" && listed.has(a));
   if (!ok) return false;
-  sameRelease.add(clientId);
-  const all = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
-  const covered = new Set((await scope.clients.matchAll({ type: "window" })).map((c) => c.id));
-  if (all.some((c) => !covered.has(c.id) && !sameRelease.has(c.id))) return false;
   await scope.clients.claim();
   return true;
 }

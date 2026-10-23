@@ -9,25 +9,45 @@ const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 /**
  * pdf.js needs a few data files at runtime: fonts for PDFs that don't include
  * their own, character maps for Chinese, Japanese and Korean text, and image
- * decoders. They are served from the app itself under /pdfjs/, so nothing is ever
+ * decoders. They are served from the app itself under /pdfjs/<hash>/, so nothing is ever
  * fetched from another site. (Its script-in-PDF engine is left out on purpose.)
  */
 const PDFJS = here("node_modules/pdfjs-dist");
 const PDFJS_DIRS = ["standard_fonts", "cmaps", "wasm", "iccs"];
 const PDFJS_SKIP = /^quickjs/;
 
-function pdfjsFiles(): { name: string; path: string }[] {
-  const out: { name: string; path: string }[] = [];
+function pdfjsSources(): { rel: string; path: string }[] {
+  const out: { rel: string; path: string }[] = [];
   for (const dir of PDFJS_DIRS) {
     for (const file of readdirSync(join(PDFJS, dir)).sort()) {
       if (PDFJS_SKIP.test(file)) continue;
       const path = join(PDFJS, dir, file);
-      if (statSync(path).isFile()) out.push({ name: `pdfjs/${dir}/${file}`, path });
+      if (statSync(path).isFile()) out.push({ rel: `${dir}/${file}`, path });
     }
   }
   // pdf.js's own license (Apache 2.0), served beside its files.
-  out.push({ name: "pdfjs/LICENSE", path: join(PDFJS, "LICENSE") });
+  out.push({ rel: "LICENSE", path: join(PDFJS, "LICENSE") });
   return out;
+}
+
+/**
+ * The data files live under a folder named after a hash of their contents
+ * (/pdfjs/<hash>/cmaps/...), like the app's scripts. A page only ever asks for
+ * its own version's files, so pages and data files of different versions can
+ * never be mixed, whatever the service worker does.
+ */
+const PDFJS_HASH = (() => {
+  const hash = createHash("sha256");
+  for (const f of pdfjsSources()) {
+    hash.update(f.rel);
+    hash.update(readFileSync(f.path));
+  }
+  return hash.digest("hex").slice(0, 12);
+})();
+const PDFJS_BASE = `/pdfjs/${PDFJS_HASH}/`;
+
+function pdfjsFiles(): { name: string; path: string }[] {
+  return pdfjsSources().map((f) => ({ name: `${PDFJS_BASE.slice(1)}${f.rel}`, path: f.path }));
 }
 
 const TYPES: Record<string, string> = {
@@ -97,6 +117,7 @@ function serviceWorker(): Plugin {
 
 export default defineConfig({
   plugins: [pdfjsData(), serviceWorker()],
+  define: { __PDFJS_BASE__: JSON.stringify(PDFJS_BASE) },
   build: { target: "es2022", chunkSizeWarningLimit: 2000 },
   worker: { format: "es" },
 });
