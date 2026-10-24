@@ -11,7 +11,8 @@ updates:
           - minor
           - patch
     ignore:
-      # The apps run on Node 22 (CI and Vercel); keep the Node type definitions on that major.
+      # CI tests on Node 22; keep the Node type definitions on that compatibility baseline.
+      # (Vercel builds currently use Node 24; Node only builds these static apps.)
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
