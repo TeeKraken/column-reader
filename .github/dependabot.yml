@@ -10,6 +10,10 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # The apps run on Node 22 (CI and Vercel); keep the Node type definitions on that major.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
