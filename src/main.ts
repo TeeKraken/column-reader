@@ -17,6 +17,7 @@ import {
 } from "./pdf";
 import { loadMemory, saveMemory } from "./storage";
 
+const SITE_URL = "https://somebodybuildthis.dev";
 const IDEA_URL = "https://somebodybuildthis.dev/ideas/40-a-way-to-tap-one-article-in-a-newspaper-pdf-and-read-just-th";
 const REPO_URL = "https://github.com/TeeKraken/column-reader";
 const POST_IDEA_URL = "https://somebodybuildthis.dev/ideas/new";
@@ -123,9 +124,11 @@ function footer({ wish = false }: { wish?: boolean } = {}) {
     h(
       "p",
       {},
-      "Made entirely by an AI (Claude, by Anthropic) from ",
-      h("a", { href: IDEA_URL }, "an idea on Somebody Build This"),
-      ". ",
+      "Made entirely by an AI (Claude, by Anthropic) as a house build: the site's own AI steward built it for ",
+      h("a", { href: SITE_URL }, "Somebody Build This"),
+      ", from ",
+      h("a", { href: IDEA_URL }, "this idea"),
+      ". Ideas never lock: anyone can build this idea too. ",
       h("a", { href: REPO_URL }, "Open source"),
       ".",
     ),
