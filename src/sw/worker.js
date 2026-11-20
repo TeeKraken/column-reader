@@ -81,6 +81,8 @@ export function registerWorker(scope, config) {
   scope.addEventListener("fetch", (event) => {
     const req = event.request;
     if (req.method !== "GET" || new URL(req.url).origin !== scope.location.origin) return;
+    // Search-engine files (robots, sitemap, IndexNow key) always come from the network, never the app shell.
+    if (/^\/(robots\.txt|sitemap\.xml|[0-9a-f]{32}\.txt)$/.test(new URL(req.url).pathname)) return;
     if (req.mode === "navigate") {
       event.respondWith(handleNavigation(scope, cacheName, req));
       return;

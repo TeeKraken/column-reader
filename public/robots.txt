@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://column-reader.vercel.app/sitemap.xml
